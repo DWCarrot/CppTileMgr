@@ -115,7 +115,9 @@ public:
 	~STBImage();
 	bool allocate(int w, int h, int ch);
 	void clear();
+protected:
 	void move(STBImage & img);
+public:
 	inline int getW() const { return w; }
 	inline int getH() const { return h; }
 	inline int getC() const { return ch; }
@@ -135,6 +137,10 @@ public:
 	STBImage appendAlpha(const RGBTuple & transparent);
 	STBImage removeAlpha();
 	STBImage removeAlpha(const RGBTuple & transparent);
+	bool hasColor(const RGBTuple & color);
+	bool hasColor(const RGBATuple & color);
+	bool allColor(const RGBTuple & color);
+	bool allColor(const RGBATuple & color);
 	bool iterate(int xmin, int ymin, int xmax, int ymax, const std::function<bool(uint8_t *pixel, int ch, int x, int y)> & callback);
 	bool iterate(int xmin, int ymin, int xmax, int ymax, bool(*callback)(uint8_t *pixel, int ch, int x, int y, void *args), void *args = nullptr);
 	STBImage & set(const STBImage & img, int xmin, int ymin, int xmax, int ymax, int tx, int ty);

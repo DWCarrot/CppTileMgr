@@ -340,11 +340,8 @@ void test6()
 
 int main(int argc, char * const argv[])
 {
-    std::cout << "Hello World!\n";
 
-	std::cout << sizeof(STBImage) << std::endl;
-
-	demo(argc, argv);
+	demo(argc - 1, argv + 1);
 
 	return 0;
 }

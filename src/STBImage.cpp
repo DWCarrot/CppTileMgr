@@ -52,6 +52,7 @@ STBImage::STBImage()
 
 STBImage::STBImage(int w, int h, int ch)
 {
+	STBImage();
 	int sz = w * h * ch;
 	this->data = (uint8_t*)STBIMG_MALLOC(sz);
 	if (this->data == nullptr)
@@ -94,6 +95,7 @@ STBImage::STBImage(const STBImage & img)
 
 STBImage::STBImage(STBImage && img)
 {
+	STBImage();
 	if (img.data != nullptr)
 	{
 		w = img.w;
@@ -101,14 +103,6 @@ STBImage::STBImage(STBImage && img)
 		ch = img.ch;
 		data = img.data;
 		exception = img.exception;
-	}
-	else
-	{
-		w = 0;
-		h = 0;
-		ch = 0;
-		data = nullptr;
-		exception = 0;
 	}
 	img.w = 0;
 	img.h = 0;
@@ -142,8 +136,7 @@ STBImage & STBImage::operator=(const STBImage & img)
 
 STBImage & STBImage::operator=(STBImage && img)
 {
-	if (data != nullptr)
-		STBIMG_FREE(data);
+	clear();
 	if (img.data != nullptr)
 	{
 		w = img.w;
@@ -151,14 +144,6 @@ STBImage & STBImage::operator=(STBImage && img)
 		ch = img.ch;
 		data = img.data;
 		exception = img.exception;
-	}
-	else
-	{
-		w = 0;
-		h = 0;
-		ch = 0;
-		data = nullptr;
-		exception = 0;
 	}
 	img.w = 0;
 	img.h = 0;
@@ -170,10 +155,7 @@ STBImage & STBImage::operator=(STBImage && img)
 
 STBImage::~STBImage()
 {
-	if (data != nullptr)
-	{
-		STBIMG_FREE(data);
-	}
+	clear();
 }
 
 bool STBImage::allocate(int w, int h, int ch)
@@ -430,7 +412,7 @@ STBImage STBImage::scale(int nw, int nh, const STBImage::ScaleOpts filter, const
 		res.setException(STBImage::EXCEPTION_EMPTY);
 		return res;
 	}
-	if (nw <= 0 || nh <= 0)
+	if (nw <= 0 || nh <= 0 || ch < 0 || ch > 4)
 	{
 		res.setException(STBImage::EXCEPTION_SIZE);
 		return res;
@@ -440,6 +422,7 @@ STBImage STBImage::scale(int nw, int nh, const STBImage::ScaleOpts filter, const
 	int pixelBW = ch;
 
 	int alpha_channel = STBIR_ALPHA_CHANNEL_NONE;
+
 	if (ch == 4 || ch == 2)
 		alpha_channel = ch - 1;
 
@@ -689,17 +672,17 @@ STBImage STBImage::removeAlpha()
 		res.setException(STBImage::EXCEPTION_EMPTY);
 		return res;
 	}
-	if (ch == 2 || ch == 4)
+	if (ch == 1 || ch == 3)
 	{
 		res.setException(STBImage::EXCEPTION_CHANNEL);
 		return res;
 	}
 	const int picSize = w * h;
-	if (ch == 3)
+	if (ch == 4)
 	{
-		if (!res.allocate(w, h, 4))
+		if (!res.allocate(w, h, 3))
 			return res;
-		for (auto pTgt = res.data, pSrc = data, end = pSrc + (picSize * 3); pSrc < end; pSrc += 3, pTgt += 4)
+		for (auto pTgt = res.data, pSrc = data, end = pSrc + (picSize * 4); pSrc < end; pSrc += 4, pTgt += 3)
 		{
 			pTgt[0] = pSrc[0];
 			pTgt[1] = pSrc[1];
@@ -707,11 +690,11 @@ STBImage STBImage::removeAlpha()
 		}
 		return res;
 	}
-	if (ch == 1)
+	if (ch == 2)
 	{
-		if (!res.allocate(w, h, 2))
+		if (!res.allocate(w, h, 1))
 			return res;
-		for (auto pTgt = res.data, pSrc = data, end = pSrc + (picSize * 1); pSrc < end; pSrc += 1, pTgt += 2)
+		for (auto pTgt = res.data, pSrc = data, end = pSrc + (picSize * 2); pSrc < end; pSrc += 2, pTgt += 1)
 		{
 			pTgt[0] = pSrc[0];
 		}
@@ -774,7 +757,68 @@ STBImage STBImage::removeAlpha(const RGBTuple & transparent)
 		}
 		return res;
 	}
+	res.setException(STBImage::EXCEPTION_CHANNEL);
 	return res;
+}
+
+bool STBImage::hasColor(const RGBTuple & color)
+{
+	if (data == nullptr)
+		return false;
+	if (ch < 3)
+		return false;
+	const int bw = ch;
+	for (uint8_t *p = data, *end = data + (w * h * bw); p < end; p += bw)
+	{
+		if (p[0] == color.r && p[1] == color.g && p[2] == color.b)
+			return true;
+	}
+	return false;
+}
+
+bool STBImage::hasColor(const RGBATuple & color)
+{
+	if (data == nullptr)
+		return false;
+	if (ch < 4)
+		return false;
+	const int bw = ch;
+	for (uint8_t *p = data, *end = data + (w * h * bw); p < end; p += bw)
+	{
+		if (p[0] == color.r && p[1] == color.g && p[2] == color.b && p[3] == color.a)
+			return true;
+	}
+	return false;
+}
+
+bool STBImage::allColor(const RGBTuple & color)
+{
+	if (data == nullptr)
+		return false;
+	if (ch < 3)
+		return false;
+	const int bw = ch;
+	for (uint8_t *p = data, *end = data + (w * h * bw); p < end; p += bw)
+	{
+		if (p[0] != color.r || p[1] != color.g || p[2] != color.b)
+			return false;
+	}
+	return true;
+}
+
+bool STBImage::allColor(const RGBATuple & color)
+{
+	if (data == nullptr)
+		return false;
+	if (ch < 4)
+		return false;
+	const int bw = ch;
+	for (uint8_t *p = data, *end = data + (w * h * bw); p < end; p += bw)
+	{
+		if (p[0] != color.r || p[1] != color.g || p[2] != color.b || p[3] != color.a)
+			return false;
+	}
+	return true;
 }
 
 bool STBImage::iterate(int xmin, int ymin, int xmax, int ymax, const std::function<bool(uint8_t*pixel, int ch, int x, int y)>& callback)
@@ -1009,6 +1053,8 @@ uint16_t STBImage::cover_rgba(STBImage & dst, int xr, int yr, STBImage & back, i
 
 	return 0;
 }
+
+
 
 
 

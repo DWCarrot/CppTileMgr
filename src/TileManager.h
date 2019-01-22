@@ -109,6 +109,8 @@ private:
 
 	int updateTile(const TileId & id, const std::set<TileId>& list);
 
+public:
+
 };
 
 

@@ -331,7 +331,7 @@ int TileManager::updateTile(const TileId & id, const std::set<TileId>& ls)
 		}
 		else
 		{
-			s.move(it->second);
+			s = it->second;
 			cache.erase(it);
 		}
 		if (s.isEmpty() && root.getC() == 3)
@@ -347,19 +347,24 @@ int TileManager::updateTile(const TileId & id, const std::set<TileId>& ls)
 			ef++;
 		}
 	}
-	if (ef == 0)
+	if (ef == 0 || root.getC() < 3)
 		return 0;
+
+	if (!root.hasColor(transparent) && root.getC() == 4)
+		root = root.removeAlpha();
 	root = root.scale(
 		tw, th, 
 		STBImage::ScaleOpts::FILTER_DEFAULT, 
 		STBImage::ScaleOpts::EDGE_CLAMP,
 		STBImage::ResizeFlag_ALPHA_PREMULTIPLIED
 	);
-	root.save(buildPath(id));
+	if(!root.allColor(transparent))
+		root.save(buildPath(id));
 	if(id.z < maxZ)
 		cache.emplace(std::make_pair(id, root));
 	return 0;
 }
+
 
 TileManager::~TileManager()
 {
@@ -571,7 +576,7 @@ int demo(int argc, char * const argv[])
 	bool cheakDir = false;	//x
 	std::vector<std::string> args;
 	int stri = 0;
-	int argi = 1;
+	int argi = 0;
 	char opt;
 	const char *optarg;
 	char *end;
@@ -726,7 +731,7 @@ int demo(int argc, char * const argv[])
 
 	Timer timer;
 
-	if ((mode | 1) == 1)
+	if ((mode & 1) == 1)
 	{
 		printf("==== cover tiles ====\n");
 		for (int i = 0; i < args.size(); i += 2)
@@ -754,9 +759,9 @@ int demo(int argc, char * const argv[])
 		}
 		printf("====  ====\n");
 	}
-	if ((mode | 2) == 2)
+	if ((mode & 2) == 2)
 	{
-		int itv = (mode | 1) + 1;
+		int itv = (mode & 1) + 1;
 		printf("==== update tiles ====\n");
 		for (int i = 0; i < args.size(); i += itv)
 		{

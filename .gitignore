@@ -32,4 +32,12 @@
 *.app
 
 # VS2017 files
-*/.vs
+.vs/*
+*.sln
+*.vcxproj
+*.vcxproj.*
+Debug/*
+x64/Debug/*
+*.png
+Release/*
+x64/Release/*
