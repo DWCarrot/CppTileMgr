@@ -7,10 +7,9 @@
 #include <string.h>
 #include <exception>
 
-#include "STBImage.h"
-#include "Util.h"
-#include "TileManager.h"
+#include "implement.h"
 
+/*
 RGBATuple c = { 0,0,0,0 };
 uint8_t *cl = (uint8_t*)&c;
 
@@ -337,7 +336,7 @@ void test6()
 			printf("XY: (%d,%d)\n", x, y);
 	}
 }
-
+*/
 int main(int argc, char * const argv[])
 {
 

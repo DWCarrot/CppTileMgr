@@ -1,7 +1,7 @@
 
 #include "pch.h"
 #include "TileManager.h"
-#include "Util.h"
+
 
 int parseRGBTuple(RGBTuple & res, const std::string & s)
 {
@@ -180,19 +180,28 @@ int TileId::directionTo(const TileId & id) const
 
 
 
+TileManager::TileManager()
+{
+	minZ = 0;
+	maxZ = 0;
+	tw = 0;
+	th = 0;
+	checkdir = false;
+	transparent = { 0,0,0 };
+	edgeOpt = STBImage::ScaleOpts::EDGE_CLAMP;
+	filterOpt = STBImage::ScaleOpts::FILTER_DEFAULT;
 
+	memset(order, -1, sizeof(order));
+
+	list.clear();
+}
 
 TileManager::TileManager(int minZoom, int maxZoom, int tileW, int tileH)
 {
+	
 	if (minZoom <= maxZoom)
 	{
-		minZ = minZoom;
-		maxZ = maxZoom;
-		tw = tileW;
-		th = tileH;
-		transparent = { 0,0,0 };
-		edgeOpt = STBImage::ScaleOpts::EDGE_CLAMP;
-		filterOpt = STBImage::ScaleOpts::FILTER_DEFAULT;
+		setGeo(minZoom, maxZoom, tileW, tileH);
 	}
 }
 
@@ -298,14 +307,20 @@ std::string TileManager::buildPath(const TileId & id, bool ensure)
 	return res;
 }
 
-void TileManager::update(TileId root)
+void TileManager::update(TileId root, std::map<TileId, STBImage> & cache)
 {
 	std::function<int(const TileId&, const std::set<TileId>&)> cb 
-		= std::bind(&TileManager::updateTile, this, std::placeholders::_1, std::placeholders::_2);
+		= std::bind(&TileManager::updateTile, this, cache, std::placeholders::_1, std::placeholders::_2);
 	route(root, cb);
 }
 
-int TileManager::updateTile(const TileId & id, const std::set<TileId>& ls)
+void TileManager::update(TileId root)
+{
+	std::map<TileId, STBImage> cache;
+	update(root, cache);
+}
+
+int TileManager::updateTile(std::map<TileId, STBImage> & cache, const TileId & id, const std::set<TileId>& ls)
 {
 	if (id.z == maxZ)
 	{
@@ -316,8 +331,9 @@ int TileManager::updateTile(const TileId & id, const std::set<TileId>& ls)
 		}*/
 		return 0;
 	}
-	STBImage root(tw * 2, th * 2, 3);
+	STBImage root(tw * 2, th * 2, 4);
 	int ef = 0;
+	size_t ct = 0;
 	for (int d = 0; d < 4; ++d)
 	{
 		int offx = (d & 1) * tw;
@@ -331,18 +347,17 @@ int TileManager::updateTile(const TileId & id, const std::set<TileId>& ls)
 		}
 		else
 		{
-			s = it->second;
+			s = std::move(it->second);
 			cache.erase(it);
-		}
-		if (s.isEmpty() && root.getC() == 3)
-			root = root.appendAlpha(transparent);
-		if (!s.isEmpty() && s.getC() >= 3 && s.getC() <= 4 && s.getW() == tw && s.getH() == th)
+		}	
+		/*if (s.isEmpty() && root.getC() == 3)
+			root = root.appendAlpha(transparent);*/
+		if (!s.isEmpty() && checkTileSize(s) && s.getC() >= 3 && s.getC() <= 4 && s.getW() == tw && s.getH() == th)
 		{
-			if (s.getC() < root.getC())
+			/*if (s.getC() < root.getC())
 				s = s.appendAlpha(transparent);
-			else if (s.getC() > root.getC())
-				root = root.appendAlpha(transparent);
-			root.set(s, 0, 0, s.getW(), s.getH(), offx, offy);
+			root.set(s, 0, 0, s.getW(), s.getH(), offx, offy);*/
+			set(root, s, offx, offy, ct);
 			s.clear();
 			ef++;
 		}
@@ -350,7 +365,7 @@ int TileManager::updateTile(const TileId & id, const std::set<TileId>& ls)
 	if (ef == 0 || root.getC() < 3)
 		return 0;
 
-	if (!root.hasColor(transparent) && root.getC() == 4)
+	if (ef == 4 && ct == 0)
 		root = root.removeAlpha();
 	root = root.scale(
 		tw, th, 
@@ -358,12 +373,116 @@ int TileManager::updateTile(const TileId & id, const std::set<TileId>& ls)
 		STBImage::ScaleOpts::EDGE_CLAMP,
 		STBImage::ResizeFlag_ALPHA_PREMULTIPLIED
 	);
-	if(!root.allColor(transparent))
-		root.save(buildPath(id));
+	root.save(buildPath(id, checkdir));
 	if(id.z < maxZ)
+	{
 		cache.emplace(std::make_pair(id, root));
+	}
+		
 	return 0;
 }
+
+int TileManager::set(STBImage & tgt, STBImage & src, int offx, int offy, size_t & count)
+{
+	int i, j;
+	const int bwT = tgt.getC(), bwS = src.getC(), lwT = bwT * tgt.getW(), lwS = bwS * src.getW();
+	const bool alphaT = tgt.getC() == 4, alphaS = src.getC() == 4;
+	bool tr, tg, tb, t;
+	uint8_t *pT, *pTL, *pS, *pSL, alpha;
+	for (
+		j = 0, pTL = tgt.getData() + offy * lwT, pSL = src.getData();
+		j < th;
+		j += 1, pTL += lwT, pSL += lwS
+		)
+	{
+		for (
+			i = 0, pT = pTL + offx * bwT, pS = pSL;
+			i < tw;
+			i += 1, pT += bwT, pS += bwS
+			)
+		{
+			tr = (pT[0] = pS[0]) != transparent.r;
+			tg = (pT[1] = pS[1]) != transparent.g;
+			tb = (pT[2] = pS[2]) != transparent.b;
+			alpha = alphaS ? pS[3] : (0xFF * (tr || tg || tb));
+			if (alphaT)
+				pT[3] = alpha;
+			count += (int)(alpha != 0xFF);
+		}
+	}
+	return 0;
+}
+
+int TileManager::coverTile(int x, int y, const std::string & pic)
+{
+	TileId tile(maxZ, x, y);
+	STBImage img1, img2;
+	std::string old = buildPath(tile);
+	img2.load(pic);
+	if (img2.getException() & STBImage::EXCEPTION_C_LOAD_FAIL)
+		return STBImage::EXCEPTION_C_LOAD_FAIL;
+	if (old.empty())
+		return 0x010000;
+	img1.load(old);
+	if (img1.getException() & STBImage::EXCEPTION_C_LOAD_FAIL)
+	{
+		img1.clearException(STBImage::EXCEPTION_C_LOAD_FAIL);
+		img1.allocate(img1.getW(), img1.getH(), 4);
+	}
+	if (!(checkTileSize(img1) && checkTileSize(img2)))
+		return STBImage::EXCEPTION_SIZE;
+	if (img1.getC() < 3 || img2.getC() < 3)
+		return STBImage::EXCEPTION_CHANNEL;
+	if (img1.getC() < img2.getC() || img2.hasColor(transparent))
+		img1 = img1.appendAlpha(transparent);
+
+	int i;
+	const int bw1 = img1.getC(), bw2 = img2.getC();
+	const bool alpha1 = (bw1 == 4), alpha2 = (bw2 == 4);
+	uint8_t  *p1, *p2;
+
+	const int sz = tw * th;
+
+	size_t transparent_count = 0;
+
+	for (i = 0, p1 = img1.getData(), p2 = img2.getData();
+		i < sz;
+		i += 1, p1 += bw1, p2 += bw2
+		) {
+
+		if ((p2[0] == transparent.r && p2[1] == transparent.g && p2[2] == transparent.b) || (alpha2 && p2[3] == 0))
+		{
+			
+		}
+		else
+		{
+			p1[0] = p2[0];
+			p1[1] = p2[1];
+			p1[2] = p2[2];
+			if (alpha1)
+				p1[3] = 255;
+		}
+		if ((p1[0] == transparent.r && p1[1] == transparent.g && p1[2] == transparent.b) || (alpha1 && p1[3] == 0))
+		{
+			transparent_count++;
+		}
+	}
+
+	if (img1.getC() > 3 && transparent_count == 0)
+		img1 = img1.removeAlpha();
+
+	img1.save(old, checkdir);
+	return img1.getException();
+}
+
+
+
+
+void TileManager::clear()
+{
+	list.clear();
+}
+
 
 
 TileManager::~TileManager()
@@ -376,10 +495,6 @@ std::set<TileId>& TileManager::getList()
 	return list;
 }
 
-std::map<TileId, STBImage>& TileManager::getCache()
-{
-	return cache;
-}
 
 int TileManager::zmin() const
 {
@@ -411,6 +526,11 @@ bool TileManager::pathInited()
 	return (order[0] | order[1] | order[2]) >= 0;
 }
 
+bool TileManager::geoInited()
+{
+	return tw > 0 && th > 0 && minZ <= maxZ;
+}
+
 bool TileManager::needCheckDir()
 {
 	return checkdir;
@@ -421,7 +541,7 @@ void TileManager::setCheckDir(bool checkdir)
 	this->checkdir = checkdir;
 }
 
-void TileManager::setTransparent(const RGBATuple & transparent)
+void TileManager::setTransparent(const RGBTuple & transparent)
 {
 	memcpy(&this->transparent, &transparent, sizeof(transparent));
 }
@@ -557,236 +677,9 @@ int m_getShortOpt(char *opt, const char **optarg, int argc, char *const *argv, c
 	return 0;
 }
 
-void usage()
-{
-	
-}
 
-int demo(int argc, char * const argv[])
-{
-	int tw = 0;	//W
-	int th = 0;	//H
-	int minZ = 0;	//T
-	int maxZ = 0;	//B
-	RGBTuple transparent = { 0, 0, 0 };	//c
-	STBImage::ScaleOpts edgeOpt = STBImage::ScaleOpts::EDGE_CLAMP;	//e
-	STBImage::ScaleOpts filterOpt = STBImage::ScaleOpts::FILTER_DEFAULT;	//f
-	std::string pattern;	//p
-	int mode = 3;	//m		only-cover:1	only-update:2	all:3
-	bool cheakDir = false;	//x
-	std::vector<std::string> args;
-	int stri = 0;
-	int argi = 0;
-	char opt;
-	const char *optarg;
-	char *end;
-	while (m_getShortOpt(&opt, &optarg, argc, argv ,"hW:H:T:B:c:e:f:p:m:x", &argi) != -1)
-	{
-		switch (opt)
-		{
-		case 'h':
-			usage();
-			return 0;
-		case 'W':
-			tw = strtol(optarg, &end, 10);
-			if (tw <= 0)
-			{
-				puts("illegal argument: tile width (\"-w\")");
-				return 0;
-			}
-			break;
-		case 'H':
-			th = strtol(optarg, &end, 10);
-			if (th <= 0)
-			{
-				puts("illegal argument: tile height (\"-h\")");
-				return 0;
-			}
-			break;
-		case 'T':
-			minZ = strtol(optarg, &end, 10);
-			if (optarg == end)
-			{
-				puts("illegal argument: minZoom (top-layer-zoom \"-t\")");
-				return 0;
-			}
-			break;
-		case 'B':
-			maxZ = strtol(optarg, &end, 10);
-			if (optarg == end)
-			{
-				puts("illegal argument: maxZoom (bottom-layer-zoom \"-b\")");
-				return 0;
-			}
-			break;
-		case 'c':
-			if (parseRGBTuple2(transparent, optarg) != 0)
-			{
-				transparent = { 0, 0, 0 };
-				puts("illegal argument: transparent color (\"-c\")");
-				return 0;
-			}
-			break;
-		case 'e':
-			do
-			{
-				if (strcmp(optarg, "CLAM") == 0)
-				{
-					edgeOpt = STBImage::ScaleOpts::EDGE_CLAMP;	break;
-				}
-				if (strcmp(optarg, "REFLECT") == 0)
-				{
-					edgeOpt = STBImage::ScaleOpts::EDGE_REFLECT;	break;
-				}
-				if (strcmp(optarg, "WRAP") == 0)
-				{
-					edgeOpt = STBImage::ScaleOpts::EDGE_WRAP;	break;
-				}
-				if (strcmp(optarg, "ZERO") == 0)
-				{
-					edgeOpt = STBImage::ScaleOpts::EDGE_ZERO;	break;
-				}
-				puts("illegal argument: scale-edge option (\"-e\")");
-				return 0;
-			} while (false);
-			break;
-		case 'f':
-			do
-			{
-				if (strcmp(optarg, "DEFAULT") == 0)
-				{
-					filterOpt = STBImage::ScaleOpts::FILTER_DEFAULT;	break;
-				}
-				if (strcmp(optarg, "BOX") == 0)
-				{
-					filterOpt = STBImage::ScaleOpts::FILTER_BOX;	break;
-				}
-				if (strcmp(optarg, "TRIANGLE") == 0)
-				{
-					filterOpt = STBImage::ScaleOpts::FILTER_TRIANGLE;	break;
-				}
-				if (strcmp(optarg, "CUBICBSPLINE") == 0)
-				{
-					filterOpt = STBImage::ScaleOpts::FILTER_CUBICBSPLINE;	break;
-				}
-				if (strcmp(optarg, "CATMULLROM") == 0)
-				{
-					filterOpt = STBImage::ScaleOpts::FILTER_CATMULLROM;	break;
-				}
-				if (strcmp(optarg, "FILTER_MITCHELL") == 0)
-				{
-					filterOpt = STBImage::ScaleOpts::FILTER_MITCHELL;	break;
-				}
-				puts("illegal argument: scale-interpolation option (\"-f\")");
-				return 0;
-			} while (false);
-			break;
-		case 'p':
-			pattern = std::string(optarg);
-			break;
-		case 'm':
-			mode = strtol(optarg, &end, 10);
-			if(optarg == end || mode < 1 || mode > 3)
-			{
-				puts("illegal argument: mode (\"-m\")");
-				return 0;
-			}
-			break;
-		case 'x':
-			cheakDir = true;
-			break;
-		case '\0':
-			args.push_back(optarg);
-			break;
-		default:
-			break;
-		}
-	}
 
-	if(tw <= 0)
-	{
-		puts("illegal argument: tile width (\"-w\")");
-		return 0;
-	}
-	if (th <= 0)
-	{
-		puts("illegal argument: tile height (\"-h\")");
-		return 0;
-	}
-	if (minZ > maxZ)
-	{
-		puts("illegal argument: minZoom (top-layer-zoom \"-t\") or maxZoom (bottom-layer-zoom \"-b\")");
-		return 0;
-	}
-	TileManager mgr(minZ, maxZ, tw, th);
-	if (!mgr.registerPath(pattern))
-	{
-		puts("illegal argument: path pattern (\"-p\")");
-		return 0;
-	}
 
-	mgr.setEdgeOpt(edgeOpt);
-	mgr.setFilterOpt(filterOpt);
-	mgr.setCheckDir(cheakDir);
-
-	Timer timer;
-
-	if ((mode & 1) == 1)
-	{
-		printf("==== cover tiles ====\n");
-		for (int i = 0; i < args.size(); i += 2)
-		{
-			timer.start();
-			TileId tile;
-			tile.z = mgr.zmin();
-			if (parseXY(tile.x, tile.y, args.at(i)) != 0)
-				continue;
-			std::string path = mgr.buildPath(tile, mgr.needCheckDir());
-			STBImage img1, img2;
-			img1.load(path);
-			img2.load(args.at(i + 1));
-			if (!(mgr.checkTileSize(img1) && mgr.checkTileSize(img2)))
-				continue;
-			size_t c;
-			if (STBImage::cover_rgba(img1, 0, 0, img1, 0, 0, img2, 0, 0, mgr.tileW(), mgr.tileH(), mgr.getTransparent(), c))
-				continue;
-			if (c == 0 && img1.getC() == 4)
-				img1 = img1.removeAlpha();
-			if (img1.save(path).getException())
-				continue;
-			timer.stop();
-			printf("\tTile (%d,(%d,%d)) coverd [by %s]\t\t\t%fs\n", tile.z, tile.x, tile.y, args.at(i + 1).c_str(), timer.get());
-		}
-		printf("====  ====\n");
-	}
-	if ((mode & 2) == 2)
-	{
-		int itv = (mode & 1) + 1;
-		printf("==== update tiles ====\n");
-		for (int i = 0; i < args.size(); i += itv)
-		{
-			TileId tile;
-			tile.z = mgr.zmax();
-			if (parseXY(tile.x, tile.y, args.at(i)) != 0)
-				continue;
-			mgr.add(tile);
-			printf("\tadd task: tile (%d,(%d,%d))\n", tile.z, tile.x, tile.y);
-		}
-		puts("");
-		for (auto i : mgr.getList())
-		{
-			if (i.z > mgr.zmin())
-				break;
-			timer.start();
-			mgr.update(i);
-			timer.stop();
-			printf("\tcomplete branch  with top tile (%d,(%d,%d))\t\t\t%fs\n", i.z, i.x, i.y, timer.get());
-		}
-		printf("====  ====\n");
-	}
-
-	return 0;
-}
 
 
 

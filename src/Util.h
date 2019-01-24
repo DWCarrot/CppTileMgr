@@ -4,6 +4,8 @@
 #include <map>
 #include <stdio.h>  /* defines FILENAME_MAX */
 #include <string>
+#include <string.h>
+#include <errno.h>
 
 #ifdef _WIN32
 #include <direct.h>

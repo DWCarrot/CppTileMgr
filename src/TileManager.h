@@ -6,6 +6,7 @@
 #include <set>
 #include <vector>
 #include <map>
+#include <mutex>
 
 #include "Util.h"
 
@@ -17,6 +18,7 @@ int parseRGBTuple2(RGBTuple & res, const std::string & s);
 
 //"$x,$y"
 int parseXY(int & x, int & y, const std::string & s);
+
 
 
 struct Point
@@ -61,9 +63,11 @@ private:
 	RGBTuple transparent;
 	STBImage::ScaleOpts edgeOpt;
 	STBImage::ScaleOpts filterOpt;
+
+	std::mutex lock;
+
 private:
 	std::set<TileId> list;
-	std::map<TileId, STBImage> cache;
 	
 	std::string pathpart[4];
 	int order[3];
@@ -71,11 +75,12 @@ private:
 	bool checkdir;
 
 public:
+	TileManager();
 	TileManager(int minZoom, int maxZoom, int tileW, int tileH);//minZoom, maxZoom can reach
 	~TileManager();
 
 	std::set<TileId>& getList();
-	std::map<TileId, STBImage>& getCache();
+
 	int zmin() const;
 	int zmax() const;
 	int tileW() const;
@@ -83,10 +88,12 @@ public:
 	RGBTuple& getTransparent();
 
 	bool pathInited();
+	bool geoInited();
+
 	bool needCheckDir();
 
 	void setCheckDir(bool checkdir);
-	void setTransparent(const RGBATuple & transparent);
+	void setTransparent(const RGBTuple & transparent);
 
 	void setGeo(int minZoom, int maxZoom, int tileW, int tileH);
 
@@ -99,17 +106,30 @@ public:
 
 	std::string buildPath(const TileId & id, bool ensure = false);
 
+	void update(TileId root, std::map<TileId, STBImage> & cache);
+
 	void update(TileId root);
 
 	bool registerPath(const std::string & pattern);
 
 	bool checkTileSize(const STBImage & img);
 
+	int coverTile(int x, int y, const std::string & pic);
+
+	
+
+	void clear();
+
 private:
 
-	int updateTile(const TileId & id, const std::set<TileId>& list);
+	int updateTile(std::map<TileId, STBImage> & cache, const TileId & id, const std::set<TileId>& list);
+
+	int set(STBImage & tgt, STBImage & src, int offx, int offy, size_t & count);
 
 public:
+
+	
+	
 
 };
 
@@ -117,7 +137,7 @@ public:
 int _m_getShortOpt_search(char tgt, const char *options);
 int m_getShortOpt(char *opt, const char **optarg, int argc, char *const *argv, const char *options, int *p_argi);
 
-int demo(int argc, char *const argv[]);
+
 
 #endif // !TILEMANAGER_H__
 
