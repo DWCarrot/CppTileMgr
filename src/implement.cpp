@@ -317,6 +317,6 @@ int demo(int argc, char * const argv[])
 
 	}
 	printf("====  ====\n");
-
+	i_clear();
 	return 0;
 }
